@@ -1,0 +1,26 @@
+USE master;
+GO
+
+IF EXISTS (SELECT * FROM sys.databases WHERE name = 'AdventureWorksDW')
+BEGIN
+    ALTER DATABASE AdventureWorksDW
+    SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+
+    DROP DATABASE AdventureWorksDW;
+END
+GO
+
+CREATE DATABASE AdventureWorksDW;
+GO
+
+USE AdventureWorksDW ;
+GO
+
+CREATE SCHEMA bronze;
+GO
+
+CREATE SCHEMA silver;
+GO
+
+CREATE SCHEMA gold;
+GO
