@@ -171,7 +171,7 @@ AdventureWorks_DataWarehouse/
 │
 ├── docs/
 │
-├── images/
+├── data/
 │
 ├── powerbi/
 │
