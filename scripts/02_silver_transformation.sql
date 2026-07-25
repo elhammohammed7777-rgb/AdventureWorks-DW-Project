@@ -434,9 +434,7 @@ SELECT DISTINCT
     Freight,
     TotalDue,
     TRIM(Comment)
-FROM bronze.SalesOrderHeader
-WHERE (ShipDate IS NULL OR ShipDate >= OrderDate)
-  AND (DueDate  IS NULL OR DueDate  >= OrderDate);
+FROM bronze.SalesOrderHeader;
 GO
 
 /*=========================================================
@@ -460,9 +458,7 @@ SELECT DISTINCT
     UnitPrice,
     UnitPriceDiscount,
     LineTotal
-FROM bronze.SalesOrderDetail
-WHERE OrderQty > 0
-  AND UnitPrice >= 0;
+FROM bronze.SalesOrderDetail;
 GO
 
 
