@@ -157,9 +157,51 @@ WHERE c.StoreID IS NOT NULL AND s.BusinessEntityID IS NULL;
 GO
 
 
-SELECT pc.Name AS CategoryName, COUNT(*) AS ProductsWithoutColor
-FROM bronze.[Product] p
-LEFT JOIN bronze.ProductSubcategory ps ON p.ProductSubcategoryID = ps.ProductSubcategoryID
-LEFT JOIN bronze.ProductCategory pc ON ps.ProductCategoryID = pc.ProductCategoryID
-WHERE p.Color IS NULL OR TRIM(p.Color) = ''
-GROUP BY pc.Name;
+SELECT
+    pc.Name AS Category,
+    COUNT(*) AS MissingColorCount
+FROM bronze.Product p
+LEFT JOIN bronze.ProductSubcategory ps
+    ON p.ProductSubcategoryID = ps.ProductSubcategoryID
+LEFT JOIN bronze.ProductCategory pc
+    ON ps.ProductCategoryID = pc.ProductCategoryID
+WHERE p.Color IS NULL
+   OR TRIM(p.Color) = ''
+GROUP BY pc.Name
+ORDER BY MissingColorCount DESC;
+
+
+
+SELECT ProductID,
+       Name,
+       ProductNumber,
+       ProductSubcategoryID
+FROM bronze.Product
+WHERE Color IS NULL;
+
+
+SELECT
+    COUNT(*) AS ProductsWithoutSubcategory
+FROM bronze.Product
+WHERE ProductSubcategoryID IS NULL;
+
+
+SELECT
+    ProductID,
+    Name,
+    Color
+FROM bronze.Product
+WHERE ProductSubcategoryID IS NULL
+  AND Color IS NOT NULL;
+
+
+
+
+
+  SELECT DISTINCT Color
+FROM bronze.Product
+ORDER BY Color;
+
+SELECT DISTINCT Name
+FROM bronze.CountryRegion
+ORDER BY Name;
