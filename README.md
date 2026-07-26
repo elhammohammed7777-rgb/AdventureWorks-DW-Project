@@ -149,14 +149,19 @@ Related Dimensions:
 
 This project answers questions such as:
 
-* Which sales territories are performing best, and how has that shifted  
-   over time?
-* Which product categories or subcategories drive the most revenue?
-* How concentrated is revenue among your top customers — are a handful of 
-   accounts carrying the business?
-* What does the month-over-month or year-over-year sales trend look like?
-* Do certain products sell consistently, or are sales driven by occasional 
-   large spikes?
+* What is our total sales revenue?
+  
+* How many distinct orders have been placed?
+  
+* How many unique customers have made a purchase?
+  
+* On average, how much does each order generate?
+  
+* Which 5 territories generate the most sales revenue?
+  
+* Which product category generates the most revenue?
+  
+* Which categories and subcategories drive the most sales?
 
 
 
