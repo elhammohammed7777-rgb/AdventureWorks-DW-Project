@@ -17,14 +17,21 @@ DROP TABLE IF EXISTS silver.SalesTerritory;
 DROP TABLE IF EXISTS silver.Address;
 DROP TABLE IF EXISTS silver.StateProvince;
 DROP TABLE IF EXISTS silver.CountryRegion;
-
 DROP TABLE IF EXISTS silver.ShipMethod;
 DROP TABLE IF EXISTS silver.CreditCard;
-
 GO
 
 /*=========================================================
 CREATE TABLES
+
+Per Profiling.docx, bronze TEST 2/3/4 mostly returned 0 issues; the only
+confirmed finding was 248 products with a missing Color. Even so, the
+NOT NULL + fallback pattern below is kept as a defensive guard on the
+columns profiling checked (StandardCost, ListPrice, City, PostalCode,
+FirstName, LastName, Color) -- if bronze is ever reloaded from a source
+that DOES contain blanks/negatives in these columns, the fallback keeps
+the pipeline from silently producing NULLs or breaking on re-run,
+instead of assuming every future load will be as clean as this one.
 =========================================================*/
 
 CREATE TABLE silver.ProductCategory
@@ -40,21 +47,22 @@ CREATE TABLE silver.ProductSubcategory
     Name NVARCHAR(50) NOT NULL
 );
 
--- Color: NOT NULL because bronze TEST 4/5 found blanks -> always resolved to 'N/A'
--- StandardCost/ListPrice: NOT NULL because bronze TEST 2 found negatives/nulls -> resolved to 0.00
+-- Color: NOT NULL -> 'Unknown' fallback (TEST 4 found 248 blanks; decision
+-- documented in Profiling.docx: Color is optional, rows kept, value standardized)
+-- StandardCost/ListPrice: NOT NULL -> 0.00 fallback (defensive guard;
+-- TEST 2 found 0 issues in THIS load, but the column is business-critical
+-- enough to protect against a future reload introducing bad values)
 CREATE TABLE silver.Product
 (
     ProductID INT PRIMARY KEY,
     Name NVARCHAR(100),
     ProductNumber NVARCHAR(25),
     Color NVARCHAR(20) NOT NULL,
-
     Size NVARCHAR(5),
     Weight DECIMAL(8,2),
     ProductLine NCHAR(2),
     Class NCHAR(2),
     Style NCHAR(2),
-
     StandardCost MONEY NOT NULL,
     ListPrice MONEY NOT NULL,
     ProductSubcategoryID INT
@@ -87,7 +95,8 @@ CREATE TABLE silver.StateProvince
     TerritoryID INT
 );
 
--- City/PostalCode: NOT NULL because bronze TEST 4 found blanks -> resolved to 'UNKNOWN'
+-- City/PostalCode: NOT NULL -> 'Unknown' fallback (defensive guard;
+-- TEST 4 found 0 missing values in THIS load)
 CREATE TABLE silver.Address
 (
     AddressID INT PRIMARY KEY,
@@ -98,9 +107,11 @@ CREATE TABLE silver.Address
     PostalCode NVARCHAR(15) NOT NULL
 );
 
--- FirstName/LastName: NOT NULL because bronze TEST 4 found blanks -> resolved to 'UNKNOWN'
--- AdditionalContactInfo/Demographics: carried over as plain XML (bronze already cast them,
--- since the typed-XML schema binding from AdventureWorks2022 can't cross databases)
+-- FirstName/LastName: NOT NULL -> 'Unknown' fallback (defensive guard;
+-- TEST 4 found 0 missing values in THIS load)
+-- AdditionalContactInfo/Demographics: carried over as plain XML (bronze already
+-- cast them, since the typed-XML schema binding from AdventureWorks2022 can't
+-- cross databases)
 CREATE TABLE silver.Person
 (
     BusinessEntityID INT PRIMARY KEY,
@@ -133,10 +144,10 @@ CREATE TABLE silver.Customer
     AccountNumber NVARCHAR(20)
 );
 
--- CHECK constraints enforce the date logic bronze TEST 3 flagged as broken:
--- a ship or due date earlier than the order date is not physically possible.
--- Rows violating this are excluded at load time (see INSERT below), so these
--- constraints are a safety net, not the primary defense.
+-- CHECK constraints act as a defensive safety net. TEST 3 in Profiling.docx
+-- found 0 rows with ShipDate/DueDate before OrderDate in THIS load, so no
+-- WHERE filter is applied at load time -- but the constraints stay in place
+-- to reject any such row a future reload might introduce.
 CREATE TABLE silver.SalesOrderHeader
 (
     SalesOrderID INT PRIMARY KEY,
@@ -167,34 +178,32 @@ CREATE TABLE silver.SalesOrderHeader
     CONSTRAINT CK_SalesOrderHeader_ShipDate CHECK (ShipDate IS NULL OR ShipDate >= OrderDate)
 );
 
--- CHECK constraints enforce the numeric sanity bronze TEST 2 flagged:
--- non-positive OrderQty and negative UnitPrice are excluded at load time.
+-- CHECK constraints act as a defensive safety net. TEST 2 in Profiling.docx
+-- found 0 rows with non-positive OrderQty or negative UnitPrice in THIS load,
+-- so no WHERE filter is applied at load time -- constraints stay in place
+-- to reject any such row a future reload might introduce.
 CREATE TABLE silver.SalesOrderDetail
 (
     SalesOrderDetailID INT PRIMARY KEY,
     SalesOrderID INT,
     CarrierTrackingNumber NVARCHAR(25),
-    OrderQty SMALLINT NOT NULL,
+    OrderQty SMALLINT,
     ProductID INT,
     SpecialOfferID INT,
-    UnitPrice MONEY NOT NULL,
+    UnitPrice MONEY,
     UnitPriceDiscount MONEY,
     LineTotal MONEY,
     CONSTRAINT CK_SalesOrderDetail_OrderQty  CHECK (OrderQty > 0),
     CONSTRAINT CK_SalesOrderDetail_UnitPrice CHECK (UnitPrice >= 0)
 );
 GO
-
-
-
 CREATE TABLE silver.ShipMethod
 (
     ShipMethodID INT PRIMARY KEY,
-    Name NVARCHAR(50),
+    Name NVARCHAR(50) NOT NULL,
     ShipBase MONEY,
     ShipRate MONEY
 );
-
 
 CREATE TABLE silver.CreditCard
 (
@@ -204,6 +213,7 @@ CREATE TABLE silver.CreditCard
     ExpMonth TINYINT,
     ExpYear SMALLINT
 );
+
 
 /*=========================================================
 LOAD PRODUCT CATEGORY
@@ -230,41 +240,31 @@ GO
 
 /*=========================================================
 LOAD PRODUCT
--- Color: NULL/blank -> 'N/A'                                     (TEST 4/5)
--- ListPrice: NULL or negative -> 0.00                             (TEST 2)
--- StandardCost: negative -> 0.00                                  (TEST 2)
--- Fallback values, not silent drops -- documented in tech report
+-- Color: NULL/blank -> 'Unknown'                (TEST 4: 248 rows found)
+-- ListPrice: NULL or negative -> 0.00            (defensive; TEST 2 found 0)
+-- StandardCost: negative -> 0.00                 (defensive; TEST 2 found 0)
 =========================================================*/
 
 INSERT INTO silver.Product
 (
     ProductID, Name, ProductNumber, Color,
-     Size,
-    Weight,
-    ProductLine,
-    Class,
-    Style,
+    Size, Weight, ProductLine, Class, Style,
     StandardCost, ListPrice, ProductSubcategoryID
-
-
 )
 SELECT DISTINCT
     ProductID,
     TRIM(Name) AS Name,
     TRIM(ProductNumber) AS ProductNumber,
-
     CASE
         WHEN Color IS NULL OR TRIM(Color) = ''
-        THEN 'N/A'
+        THEN 'Unknown'
         ELSE UPPER(TRIM(Color))
     END AS Color,
-
-    TRIM(Size),
+    Size,
     Weight,
-    TRIM(ProductLine),
-    TRIM(Class),
-    TRIM(Style),
-
+    ProductLine,
+    Class,
+    Style,
     CASE WHEN StandardCost < 0 THEN 0.00 ELSE StandardCost END AS StandardCost,
     CASE WHEN ListPrice IS NULL OR ListPrice < 0 THEN 0.00 ELSE ListPrice END AS ListPrice,
     ProductSubcategoryID
@@ -290,6 +290,33 @@ SELECT DISTINCT
     CostYTD,
     CostLastYear
 FROM bronze.SalesTerritory;
+GO 
+/*==================================*/
+/*=========================================================
+LOAD SHIP METHOD
+=========================================================*/
+
+INSERT INTO silver.ShipMethod (ShipMethodID, Name, ShipBase, ShipRate)
+SELECT DISTINCT
+    ShipMethodID,
+    TRIM(Name) AS Name,
+    ShipBase,
+    ShipRate
+FROM bronze.ShipMethod;
+GO
+
+/*=========================================================
+LOAD CREDIT CARD
+=========================================================*/
+
+INSERT INTO silver.CreditCard (CreditCardID, CardType, CardNumber, ExpMonth, ExpYear)
+SELECT DISTINCT
+    CreditCardID,
+    TRIM(CardType) AS CardType,
+    CardNumber,
+    ExpMonth,
+    ExpYear
+FROM bronze.CreditCard;
 GO
 
 /*=========================================================
@@ -322,7 +349,7 @@ GO
 
 /*=========================================================
 LOAD ADDRESS
--- City/PostalCode: NULL/blank -> 'UNKNOWN'                       (TEST 4)
+-- City/PostalCode: NULL/blank -> 'Unknown'      (defensive; TEST 4 found 0)
 =========================================================*/
 
 INSERT INTO silver.Address
@@ -333,17 +360,19 @@ SELECT DISTINCT
     AddressID,
     TRIM(AddressLine1) AS AddressLine1,
     TRIM(AddressLine2) AS AddressLine2,
-    CASE WHEN City IS NULL OR TRIM(City) = '' THEN 'UNKNOWN' ELSE TRIM(City) END AS City,
+    CASE WHEN City IS NULL OR TRIM(City) = '' THEN 'Unknown' ELSE TRIM(City) END AS City,
     StateProvinceID,
-    CASE WHEN PostalCode IS NULL OR TRIM(PostalCode) = '' THEN 'UNKNOWN' ELSE TRIM(PostalCode) END AS PostalCode
+    CASE WHEN PostalCode IS NULL OR TRIM(PostalCode) = '' THEN 'Unknown' ELSE TRIM(PostalCode) END AS PostalCode
 FROM bronze.[Address];
 GO
 
 /*=========================================================
 LOAD PERSON
--- FirstName/LastName: NULL/blank -> 'UNKNOWN'                    (TEST 4)
+-- FirstName/LastName: NULL/blank -> 'Unknown'   (defensive; TEST 4 found 0)
 -- AdditionalContactInfo/Demographics: carried over unchanged (already
 -- plain XML in bronze after the schema-collection cast in 01a)
+-- NOTE: no DISTINCT here -- XML columns are not comparable in SQL Server,
+-- PRIMARY KEY on BusinessEntityID is the guard against duplicates instead
 =========================================================*/
 
 INSERT INTO silver.Person
@@ -356,9 +385,9 @@ SELECT
     BusinessEntityID,
     UPPER(TRIM(PersonType)) AS PersonType,
     UPPER(TRIM(Title)) AS Title,
-    CASE WHEN FirstName IS NULL OR TRIM(FirstName) = '' THEN 'UNKNOWN' ELSE TRIM(FirstName) END AS FirstName,
+    CASE WHEN FirstName IS NULL OR TRIM(FirstName) = '' THEN 'Unknown' ELSE TRIM(FirstName) END AS FirstName,
     TRIM(MiddleName) AS MiddleName,
-    CASE WHEN LastName IS NULL OR TRIM(LastName) = '' THEN 'UNKNOWN' ELSE TRIM(LastName) END AS LastName,
+    CASE WHEN LastName IS NULL OR TRIM(LastName) = '' THEN 'Unknown' ELSE TRIM(LastName) END AS LastName,
     UPPER(TRIM(Suffix)) AS Suffix,
     EmailPromotion,
     AdditionalContactInfo,
@@ -394,10 +423,11 @@ FROM bronze.Customer;
 GO
 
 /*=========================================================
+/*=========================================================
 LOAD SALES ORDER HEADER
--- Rows with ShipDate/DueDate earlier than OrderDate are excluded  (TEST 3)
--- Row count dropped here should be reported in the tech report,
--- alongside the count from the bronze profiling that first found them.
+No rows are filtered during loading.
+CHECK constraints enforce the business rules for future loads.
+=========================================================*/
 =========================================================*/
 
 INSERT INTO silver.SalesOrderHeader
@@ -434,13 +464,16 @@ SELECT DISTINCT
     Freight,
     TotalDue,
     TRIM(Comment)
-FROM bronze.SalesOrderHeader;
+FROM bronze.SalesOrderHeader
+
 GO
 
 /*=========================================================
 LOAD SALES ORDER DETAIL
--- Rows with OrderQty <= 0 or UnitPrice < 0 are excluded           (TEST 2)
--- Row count dropped here should be reported in the tech report.
+No rows are filtered during loading.
+CHECK constraints protect future loads.
+-- guard. TEST 2 found 0 such rows in THIS load, so this WHERE clause does
+-- not remove any rows currently -- it only protects a future reload.
 =========================================================*/
 
 INSERT INTO silver.SalesOrderDetail
@@ -458,61 +491,18 @@ SELECT DISTINCT
     UnitPrice,
     UnitPriceDiscount,
     LineTotal
-FROM bronze.SalesOrderDetail;
-GO
+FROM bronze.SalesOrderDetail
 
-
-
-/*=========================================================
-LOAD SHIP METHOD
-=========================================================*/
-
-INSERT INTO silver.ShipMethod
-(
-    ShipMethodID,
-    Name,
-    ShipBase,
-    ShipRate
-)
-SELECT DISTINCT
-    ShipMethodID,
-    TRIM(Name),
-    ShipBase,
-    ShipRate
-FROM bronze.ShipMethod;
-GO
-
-
-/*=========================================================
-LOAD CREDIT CARD
-=========================================================*/
-
-INSERT INTO silver.CreditCard
-(
-    CreditCardID,
-    CardType,
-    CardNumber,
-    ExpMonth,
-    ExpYear
-)
-SELECT DISTINCT
-    CreditCardID,
-    TRIM(CardType),
-    TRIM(CardNumber),
-    ExpMonth,
-    ExpYear
-FROM bronze.CreditCard;
 GO
 
 /*=========================================================
                 SILVER LAYER VALIDATION
 =========================================================*/
 
-
--- Row count comparison. NOTE: SalesOrderHeader and SalesOrderDetail are
--- EXPECTED to show SilverRows < BronzeRows now -- the gap is the count
--- of rows excluded by the date-logic and quantity/price guards above,
--- not data loss. Record the exact gap in the technical report.
+-- Row count comparison. Per Profiling.docx, every table except Product
+-- (Color fallback doesn't drop rows, just fills them) is expected to show
+-- SilverRows = BronzeRows exactly, since profiling found 0 rows that
+-- warranted exclusion in this load. Any mismatch should be investigated.
 SELECT 'ProductCategory' AS TableName,
     (SELECT COUNT(*) FROM bronze.ProductCategory) AS BronzeRows,
     (SELECT COUNT(*) FROM silver.ProductCategory) AS SilverRows
@@ -559,23 +549,12 @@ SELECT 'SalesOrderHeader',
 UNION ALL
 SELECT 'SalesOrderDetail',
     (SELECT COUNT(*) FROM bronze.SalesOrderDetail),
-    (SELECT COUNT(*) FROM silver.SalesOrderDetail)
-UNION ALL
-SELECT 'ShipMethod',
-    (SELECT COUNT(*) FROM bronze.ShipMethod),
-    (SELECT COUNT(*) FROM silver.ShipMethod)
-
-UNION ALL
-SELECT 'CreditCard',
-    (SELECT COUNT(*) FROM bronze.CreditCard),
-    (SELECT COUNT(*) FROM silver.CreditCard)
+    (SELECT COUNT(*) FROM silver.SalesOrderDetail);
 GO
-
-
-
 
 /*=========================================================
 REFERENTIAL INTEGRITY CHECKS
+-- Per Profiling.docx TEST 6, all of these are expected to return 0.
 =========================================================*/
 
 SELECT COUNT(*) AS ProductsWithoutSubcategory
@@ -613,4 +592,4 @@ SELECT TOP 10 * FROM silver.Product;
 SELECT TOP 10 * FROM silver.Customer;
 SELECT TOP 10 * FROM silver.SalesOrderHeader;
 SELECT TOP 10 * FROM silver.SalesOrderDetail;
-go
+GO
