@@ -202,3 +202,9 @@ AdventureWorks_DataWarehouse/
 * Extend analytical dashboards.
 * Integrate additional business domains.
 
+![Architecture](docs/architecture.png) 
+![Data Flow](docs/data_flow.png) 
+![Data Model](docs/data_model.png) 
+
+
+
