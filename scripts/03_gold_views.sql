@@ -1,3 +1,7 @@
+-- ===============================================
+-- Gold Layer developed by Rana Abdelbaset Elsayed
+-- Responsibilities: Gold Views, Dimensions, FactSales
+-- ===============================================
 USE  AdventureWorks_DW;
 GO
 
