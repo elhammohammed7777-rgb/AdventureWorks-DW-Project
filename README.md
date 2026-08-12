@@ -204,7 +204,7 @@ AdventureWorks_DataWarehouse/
 
 ![Architecture](docs/architecture.png) 
 ![Data Flow](docs/data_flow.png) 
-![Data Model](docs/data_model.png) 
+![Data Model](docs/data_model.png.jpg) 
 
 
 
